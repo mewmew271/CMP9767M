@@ -40,6 +40,7 @@ class image_projection:
 
         #define a point in robot (base_link) coordinates
         p_robot = PoseStamped()
+        print'p robot: ', p_robot
         p_robot.header.frame_id = "thorvald_001/base_link"
         p_robot.pose.orientation.w = 1.0
         #specify a point on the ground just below the camera
@@ -50,6 +51,11 @@ class image_projection:
         print 'Point in the camera coordinates'
         print p_camera.pose.position        
 
+        xyz = self.camera_model.projectPixelTo3dRay((511, 534))
+
+        print 'Pixel coordinates: ', xyz
+        print ''
+        #print'pose: ', pose.position 
         uv = self.camera_model.project3dToPixel((p_camera.pose.position.x,p_camera.pose.position.y,
             p_camera.pose.position.z))
 
