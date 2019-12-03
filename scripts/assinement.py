@@ -25,7 +25,7 @@ from cv_bridge import CvBridge, CvBridgeError
 coordsFound = []
 coordsBeen = []#the objects coords that have been moved too 
 objectCoords = [[8.9, 8]]#the objects coords to move too 
-   
+focus = []  
 class Robot_main:
 	def __init__(self):
 		# What to do if shut down (e.g. Ctrl-C or failure)
@@ -53,10 +53,15 @@ class Robot_main:
 		# Allow up to 5 seconds for the action server to come up
 		self.move_base.wait_for_server(rospy.Duration(5))
 
+		
+
 	def camera_info_callback(self, data):
 		self.camera_model = image_geometry.PinholeCameraModel()
-		self.camera_model.fromCameraInfo(data)
+		self.camera_model.fromCameraInfo(data)		
 		self.camera_info_sub.unregister() #Only subscribe once 
+		global focus
+		focus.extend(data.K)
+		
 	   
   
 	  
@@ -64,7 +69,6 @@ class Robot_main:
 		cv2.namedWindow("window", 1)
 		cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
 		hsv_img = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-		#part of move 
 		
 
 	 #carrots (basil)
@@ -89,8 +93,10 @@ class Robot_main:
 	cv2.CHAIN_APPROX_SIMPLE)
 		cnts = imutils.grab_contours(cnts)
 
+		
 		#print how many objects have been found 
-		print("I found {} objects".format(len(cnts)))
+
+		#print("I found {} objects".format(len(cnts)))
 		for c in cnts:
 		# calculate moments of binary image
 			M = cv2.moments(c) 			
@@ -104,15 +110,40 @@ class Robot_main:
 				cX = int(M["m10"] / M["m00"])
 				cY = int(M["m01"] / M["m00"])
 				centoid = cX, cY
-				print(" ")
-				print(centoid)
+				# highlight the centoid
+				cv2.circle(cv_image, (cX, cY), 5, (255, 255, 255), -1)
+				cv2.imshow("hsv", mask)
+				cv2.imshow("window", cv_image)
+				#print(" ")
+				#print(centoid)
+				fx = focus[0]
+				cx = focus[2]
+				fy = focus[4]
+				cy = focus[5]
+#https://www.cse.unr.edu/~bebis/CS791E/Notes/CameraParameters.pdf
+				#print(str(fx) + " " + str(cx )+ " " + str(fy) + " " + str(cy))
 				#objectCoords = centoid transformed 
+
+				 #define a point in robot (base_link) coordinates
+				p_robot = PoseStamped()
+				p_robot.header.frame_id = "thorvald_001/base_link"
+
+				#camera coords 
+				p_robot.pose.position.x  = (cX - focus[2])*0.5/focus[0]
+				p_robot.pose.position.y = (cY - focus[5])*0.5/focus[4]
+
+				p_camera = self.tf_listener.transformPose('thorvald_001/kinect2_rgb_optical_frame', p_robot)
+				print 'Point in the camera coordinates'
+				print p_camera.pose.position.x   
+				objectCoords[0][0] = p_camera.pose.position.x  
+				objectCoords[0][1] = p_camera.pose.position.y  
 				#check if coords have all ready been added 
 				#print'coordsFound: ', coordsFound
-				print'coordsBeen: ', coordsBeen
-				print'objectCoords: ', objectCoords
-				print(objectCoords not in coordsBeen and not len(objectCoords) == 0)
-				print(len(coordsFound))
+				#print'coordsBeen: ', coordsBeen
+				#print'objectCoords: ', objectCoords
+				#print(objectCoords not in coordsBeen and not len(objectCoords) == 0)
+				#print(len(coordsFound))
+
 				if objectCoords not in coordsBeen and not len(objectCoords) == 0:
 					#coordsFound.append(objectCoords)#add new coords to found coords
 					#here 
@@ -125,7 +156,7 @@ class Robot_main:
 					if success:
 						rospy.loginfo("Hooray, reached the desired pose")
 						coordsBeen.append(objectCoords[0])
-						objectCoords.pop(0)
+						#objectCoords.pop(0)
 						#print'coordsFound: ', coordsFound
 						print'coordsBeen: ', coordsBeen
 
@@ -133,10 +164,8 @@ class Robot_main:
 						rospy.loginfo("The base failed to reach the desired pose")
 
 
-				# highlight the centoid
-				cv2.circle(cv_image, (cX, cY), 5, (255, 255, 255), -1)
-		cv2.imshow("hsv", mask)
-		cv2.imshow("window", cv_image)
+				
+		
 
 		#show images on screen 
 		
