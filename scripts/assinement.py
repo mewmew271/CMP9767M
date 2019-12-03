@@ -24,7 +24,7 @@ from cv_bridge import CvBridge, CvBridgeError
 #coordsFound = [[8.6, 8], [-8, -8]]#the objects coords that have yet to be moved to 
 coordsFound = []
 coordsBeen = []#the objects coords that have been moved too 
-objectCoords = [[8.9, 8]]#the objects coords to move too 
+objectCoords = [[0,0]]#the objects coords to move too 
 focus = []  
 class Robot_main:
 	def __init__(self):
@@ -126,17 +126,20 @@ class Robot_main:
 
 				 #define a point in robot (base_link) coordinates
 				p_robot = PoseStamped()
-				p_robot.header.frame_id = "thorvald_001/base_link"
+				p_robot.header.frame_id = "thorvald_001/kinect2_rgb_optical_frame"
 
 				#camera coords 
 				p_robot.pose.position.x  = (cX - focus[2])*0.5/focus[0]
 				p_robot.pose.position.y = (cY - focus[5])*0.5/focus[4]
 
-				p_camera = self.tf_listener.transformPose('thorvald_001/kinect2_rgb_optical_frame', p_robot)
+				p_camera = self.tf_listener.transformPose('map', p_robot)
 				print 'Point in the camera coordinates'
-				print p_camera.pose.position.x   
+				print ("x:" + str(p_camera.pose.position.x) + "y" +str(p_camera.pose.position.y))
+				
+  
 				objectCoords[0][0] = p_camera.pose.position.x  
 				objectCoords[0][1] = p_camera.pose.position.y  
+
 				#check if coords have all ready been added 
 				#print'coordsFound: ', coordsFound
 				#print'coordsBeen: ', coordsBeen
@@ -158,7 +161,7 @@ class Robot_main:
 						coordsBeen.append(objectCoords[0])
 						#objectCoords.pop(0)
 						#print'coordsFound: ', coordsFound
-						print'coordsBeen: ', coordsBeen
+						#print'coordsBeen: ', coordsBeen
 
 					else:
 						rospy.loginfo("The base failed to reach the desired pose")
