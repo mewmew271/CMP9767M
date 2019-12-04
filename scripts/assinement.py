@@ -21,11 +21,18 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Twist 
 from cv_bridge import CvBridge, CvBridgeError
 
-#coordsFound = [[8.6, 8], [-8, -8]]#the objects coords that have yet to be moved to 
 coordsFound = []
 coordsBeen = []#the objects coords that have been moved too 
 objectCoords = [[0,0]]#the objects coords to move too 
+
+coordsTop = [[5.484, -3.784], [5.484, -2.785], [5.484, -0.761], [5.484, 0.233], [5.484, 2.188], [5.484, 3.231]]
+coordsBottom = [[-5.484, -3.784], [-5.484, -2.785], [-5.484, -0.761], [-5.484, 0.233], [-5.484, 2.188], [-5.484, 3.231]]
+currentLocation = [0, 0]#get from odom 
+
 focus = []  
+
+
+
 class Robot_main:
 	def __init__(self):
 		# What to do if shut down (e.g. Ctrl-C or failure)
@@ -62,7 +69,11 @@ class Robot_main:
 		global focus
 		focus.extend(data.K)
 		
-	   
+	    #odom for twist 
+    def odomCall(self, msg):#add + all test
+        global currentLocation
+        currentLocation[0] = msg.pose.pose.position.x
+        currentLocation[1] = msg.pose.pose.position.y
   
 	  
 	def image_callback(self, data):
@@ -79,7 +90,7 @@ class Robot_main:
 	 #100, 130, 110
 
 	   
-		lower_green = numpy.array([44, 12, 30]) #bgr arrrays 
+		lower_green = numpy.array([44, 12, 30]) #bgr arrays 
 		upper_green = numpy.array([80, 100, 70])
 		mask = cv2.inRange(hsv_img, lower_green, upper_green)        
 		mGre = cv2.moments(mask)
@@ -95,85 +106,69 @@ class Robot_main:
 
 		
 		#print how many objects have been found 
+		print("I found {} objects".format(len(cnts)))
+		if len(cnts) != 0:
+			for c in cnts:
+				# calculate moments of binary image
+				M = cv2.moments(c) 			
+				#find centoid of object 
+				if M["m10"] or M["m00"] or M["m01"] != 0:#error checking 
+					cX = int(M["m10"] / M["m00"])
+					cY = int(M["m01"] / M["m00"])
+					centoid = cX, cY
+					# highlight the centoid
+					cv2.circle(cv_image, (cX, cY), 5, (255, 255, 255), -1)
+					cv2.imshow("hsv", mask)
+					cv2.imshow("window", cv_image)
 
-		#print("I found {} objects".format(len(cnts)))
-		for c in cnts:
-		# calculate moments of binary image
-			M = cv2.moments(c) 			
+					 #define a point in robot (base_link) coordinates
+					p_robot = PoseStamped()
+					p_robot.header.frame_id = "thorvald_001/kinect2_rgb_optical_frame"
 
-		# calculate x,y coordinate of center of found object  
-		# add objects coords to coordsStack array [x, y]
-		#if set(objectCoords).isnotsubset(set(coordsStack)):
+					#camera coords 
+					p_robot.pose.position.x  = (cX - focus[2])*0.5/focus[0]
+					p_robot.pose.position.y = (cY - focus[5])*0.5/focus[4]
 
-			#find centoid of object 
-			if M["m10"] or M["m00"] or M["m01"] != 0:#error checking 
-				cX = int(M["m10"] / M["m00"])
-				cY = int(M["m01"] / M["m00"])
-				centoid = cX, cY
-				# highlight the centoid
-				cv2.circle(cv_image, (cX, cY), 5, (255, 255, 255), -1)
-				cv2.imshow("hsv", mask)
-				cv2.imshow("window", cv_image)
-				#print(" ")
-				#print(centoid)
-				fx = focus[0]
-				cx = focus[2]
-				fy = focus[4]
-				cy = focus[5]
-#https://www.cse.unr.edu/~bebis/CS791E/Notes/CameraParameters.pdf
-				#print(str(fx) + " " + str(cx )+ " " + str(fy) + " " + str(cy))
-				#objectCoords = centoid transformed 
+					p_camera = self.tf_listener.transformPose('map', p_robot)
+					print 'Point in the camera coordinates'
+					print ("x:" + str(p_camera.pose.position.x) + "y" +str(p_camera.pose.position.y))
+					
+	  
+					objectCoords[0][0] = p_camera.pose.position.x  
+					objectCoords[0][1] = p_camera.pose.position.y  
 
-				 #define a point in robot (base_link) coordinates
-				p_robot = PoseStamped()
-				p_robot.header.frame_id = "thorvald_001/kinect2_rgb_optical_frame"
+					#check if coords have all ready been added 
+					#print'coordsFound: ', coordsFound
+					#print'coordsBeen: ', coordsBeen
+					#print'objectCoords: ', objectCoords
+					#print(objectCoords not in coordsBeen and not len(objectCoords) == 0)
+					#print(len(coordsFound))
 
-				#camera coords 
-				p_robot.pose.position.x  = (cX - focus[2])*0.5/focus[0]
-				p_robot.pose.position.y = (cY - focus[5])*0.5/focus[4]
+					if objectCoords not in coordsBeen and not len(objectCoords) == 0:
+						#coordsFound.append(objectCoords)#add new coords to found coords
+						#here 
+						position = {'x':objectCoords[0][0], 'y' : objectCoords[0][1]}
+						quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
 
-				p_camera = self.tf_listener.transformPose('map', p_robot)
-				print 'Point in the camera coordinates'
-				print ("x:" + str(p_camera.pose.position.x) + "y" +str(p_camera.pose.position.y))
-				
-  
-				objectCoords[0][0] = p_camera.pose.position.x  
-				objectCoords[0][1] = p_camera.pose.position.y  
+						rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
+						success = robot_main.goto(position, quaternion)
 
-				#check if coords have all ready been added 
-				#print'coordsFound: ', coordsFound
-				#print'coordsBeen: ', coordsBeen
-				#print'objectCoords: ', objectCoords
-				#print(objectCoords not in coordsBeen and not len(objectCoords) == 0)
-				#print(len(coordsFound))
+						if success:
+							rospy.loginfo("Hooray, reached the desired pose")
+							coordsBeen.append(objectCoords[0])
+						else:
+							rospy.loginfo("The base failed to reach the desired pose")
 
-				if objectCoords not in coordsBeen and not len(objectCoords) == 0:
-					#coordsFound.append(objectCoords)#add new coords to found coords
-					#here 
-					position = {'x':objectCoords[0][0], 'y' : objectCoords[0][1]}
-					quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
+		else:
+			#here
 
-					rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
-					success = robot_main.goto(position, quaternion)
+					
+			
 
-					if success:
-						rospy.loginfo("Hooray, reached the desired pose")
-						coordsBeen.append(objectCoords[0])
-						#objectCoords.pop(0)
-						#print'coordsFound: ', coordsFound
-						#print'coordsBeen: ', coordsBeen
-
-					else:
-						rospy.loginfo("The base failed to reach the desired pose")
-
-
-				
-		
-
-		#show images on screen 
-		
-		
-		cv2.waitKey(3)
+			#show images on screen 
+			
+			
+			cv2.waitKey(3)
 
 
 	def goto(self, pos, quat):

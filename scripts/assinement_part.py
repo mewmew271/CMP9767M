@@ -24,8 +24,14 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 import actionlib
 from actionlib_msgs.msg import *
 from geometry_msgs.msg import Pose, Point, Quaternion
+from nav_msgs.msg import Odometry
+
+robotPosition = [0, 0]#add 
 
 class Robot_main():
+
+   
+
     def __init__(self):
 
         self.goal_sent = False
@@ -39,6 +45,16 @@ class Robot_main():
 
         # Allow up to 5 seconds for the action server to come up
         self.move_base.wait_for_server(rospy.Duration(5))
+
+        self.odom = rospy.Subscriber('/thorvald_001/odometry/base_raw', Odometry, self.odomCall) 
+
+     #odom for twist 
+    def odomCall(self, msg):#add + all test
+        global robotPosition
+        robotPosition[0] = msg.pose.pose.position.x
+        robotPosition[1] = msg.pose.pose.position.y
+        
+        
 
     def goto(self, pos, quat):
 
@@ -78,7 +94,7 @@ if __name__ == '__main__':
     coordsBeen = []#the objects coords that have been moved too 
     objectCoords = [8.9, 8]#the objects coords to move too 
     try:
-        while len(coordsFound) != 0:
+        while len(coordsFound) != 0: 
             rospy.init_node('nav_test', anonymous=False)
             navigator = Robot_main()
             print(Point.x)
@@ -88,7 +104,6 @@ if __name__ == '__main__':
             # Customize the following values so they are appropriate for your location
             position = {'x':coordsFound[0][0], 'y' : coordsFound[0][1]}
             quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
-
             rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
             success = navigator.goto(position, quaternion)
 
