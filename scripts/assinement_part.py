@@ -1,125 +1,227 @@
 #!/usr/bin/env python
+#sudo pip2 install imutils
+import imutils
+# Python libs
+import sys, time, copy
 
-'''
-Copyright (c) 2015, Mark Silliman
-All rights reserved.
+#import numpy
+import numpy
 
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+# OpenCV
+import cv2
 
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-'''
-
-# TurtleBot must have minimal.launch & amcl_demo.launch
-# running prior to starting this script
-# For simulation: launch gazebo world & amcl_demo prior to run this script
-
-import rospy
-from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+# Ros libraries
+import roslib, rospy, image_geometry, tf, rospy, cv_bridge
 import actionlib
+
+# Ros Messages
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from actionlib_msgs.msg import *
-from geometry_msgs.msg import Pose, Point, Quaternion
+from sensor_msgs.msg import Image, CameraInfo
+from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Twist 
+from cv_bridge import CvBridge, CvBridgeError
 from nav_msgs.msg import Odometry
 
-robotPosition = [0, 0]#add 
 
-class Robot_main():
+objectsLocated = []
+coordsBeen = [[-10000, -10000]]#the objects coords that have been moved too -10000 temp value that will not exist
+objectCoords = [0, 0]#the objects coords to move too 
 
-   
+coordsTop = [[5.484, -3.784], [5.484, -2.785], [5.484, -0.761], [5.484, 0.233], [5.484, 2.188], [5.484, 3.231]]
+coordsBottom = [[-5.484, -3.784], [-5.484, -2.785], [-5.484, -0.761], [-5.484, 0.233], [-5.484, 2.188], [-5.484, 3.231]]
+currentLocation = [0, 0]#get from odom 
+orientation = []
 
-    def __init__(self):
+focus = []  
 
-        self.goal_sent = False
 
-        # What to do if shut down (e.g. Ctrl-C or failure)
-        rospy.on_shutdown(self.shutdown)
-        
-        # Tell the action client that we want to spin a thread by default
-        self.move_base = actionlib.SimpleActionClient("move_base", MoveBaseAction)
-        rospy.loginfo("Wait for the action server to come up")
+class Robot_main:
+	def __init__(self):
+		# What to do if shut down (e.g. Ctrl-C or failure)
+		rospy.on_shutdown(self.shutdown)
 
-        # Allow up to 5 seconds for the action server to come up
-        self.move_base.wait_for_server(rospy.Duration(5))
+		self.bridge = CvBridge()
 
-        self.odom = rospy.Subscriber('/thorvald_001/odometry/base_raw', Odometry, self.odomCall) 
+		self.camera_info_sub = rospy.Subscriber('/thorvald_001/kinect2_camera/hd/camera_info', 
+			CameraInfo, self.camera_info_callback)
 
-     #odom for twist 
-    def odomCall(self, msg):#add + all test
-        global robotPosition
-        robotPosition[0] = msg.pose.pose.position.x
-        robotPosition[1] = msg.pose.pose.position.y
-        
-        
+		self.cameraView = rospy.Subscriber("/thorvald_001/kinect2_camera/hd/image_color_rect",
+			Image, self.image_callback)
 
-    def goto(self, pos, quat):
+		self.tf_listener = tf.TransformListener()
 
-        # Send a goal
-        self.goal_sent = True
-        goal = MoveBaseGoal()
-        goal.target_pose.header.frame_id = 'map'
-        goal.target_pose.header.stamp = rospy.Time.now()
-        goal.target_pose.pose = Pose(Point(pos['x'], pos['y'], 0.000), Quaternion(quat['r1'], quat['r2'], quat['r3'], quat['r4']))
-        #print(goal.target_pose.pose)
-        # Start moving
-        self.move_base.send_goal(goal)
+		self.goal_sent = False
 
-        # Allow TurtleBot up to 60 seconds to complete task
-        success = self.move_base.wait_for_result(rospy.Duration(60)) 
+		# What to do if shut down (e.g. Ctrl-C or failure)
+		rospy.on_shutdown(self.shutdown)
 
-        state = self.move_base.get_state()
-        result = False
+		self.odom = rospy.Subscriber('/thorvald_001/odometry/base_raw', Odometry, self.odomCall) 
+		
+		# Tell the action client that we want to spin a thread by default
+		self.move_base = actionlib.SimpleActionClient("move_base", MoveBaseAction)
+		rospy.loginfo("Wait for the action server to come up")
 
-        if success and state == GoalStatus.SUCCEEDED:
-                # We made it!
-            result = True
-        else:
-            self.move_base.cancel_goal()
+		# Allow up to 5 seconds for the action server to come up
+		self.move_base.wait_for_server(rospy.Duration(5))
 
-        self.goal_sent = False
-        return result
+		
 
-    def shutdown(self):
-        if self.goal_sent:
-            self.move_base.cancel_goal()
-        rospy.loginfo("Stop")
-        rospy.sleep(1)
+	def camera_info_callback(self, data):#gets camera data 
+		self.camera_model = image_geometry.PinholeCameraModel()
+		self.camera_model.fromCameraInfo(data)      
+		self.camera_info_sub.unregister() #Only subscribe once 
+		global focus
+		focus.extend(data.K)
+		
+		#odom for twist 
+	def odomCall(self, msg):#get odometry data from robot 
+		global currentLocation
+		currentLocation[0] = msg.pose.pose.position.x
+		currentLocation[1] = msg.pose.pose.position.y
+		global orientation 
+		orientation = msg.pose.pose.orientation
+		
 
-if __name__ == '__main__':
-    coordsFound = [[8.6, 8], [-8, -8]]#the objects coords that have yet to be moved to 
-    coordsBeen = []#the objects coords that have been moved too 
-    objectCoords = [8.9, 8]#the objects coords to move too 
-    try:
-        while len(coordsFound) != 0: 
-            rospy.init_node('nav_test', anonymous=False)
-            navigator = Robot_main()
-            print(Point.x)
-            print(coordsFound[0][0])
-            print(coordsFound[0][1])
+	  
+	def image_callback(self, data):#main loop 
+		#cv2.namedWindow("window", 1)
+		same = False
+		cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+		hsv_img = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+		
 
-            # Customize the following values so they are appropriate for your location
-            position = {'x':coordsFound[0][0], 'y' : coordsFound[0][1]}
-            quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
-            rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
-            success = navigator.goto(position, quaternion)
+		lower_green = numpy.array([44, 12, 30]) #bgr arrays 
+		upper_green = numpy.array([80, 100, 70])
+		mask = cv2.inRange(hsv_img, lower_green, upper_green)        
+		mGre = cv2.moments(mask)
+		
+		#denoise 
+		mask = cv2.fastNlMeansDenoising(mask, None, 7, 7, 5) 
+		#blur to remove some noise 
+		mask = cv2.medianBlur(mask, 13)
+		cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+		cnts = imutils.grab_contours(cnts)
+		
+		#print how many objects have been found 
+		print("I found {} objects".format(len(cnts)))
+		for c in cnts:
+		# calculate moments of binary image
+			M = cv2.moments(c)
+			#find centoid of object 
+			if M["m10"] or M["m00"] or M["m01"] != 0:#error checking 
+				cX = int(M["m10"] / M["m00"])
+				cY = int(M["m01"] / M["m00"])
+				centoid = cX, cY
+				#print'centoid: ', centoid 
+				# highlight the centoid of each object found 
+				cv2.circle(cv_image, (cX, cY), 5, (255, 255, 255), -1)
 
-            if success:
-                rospy.loginfo("Hooray, reached the desired pose")
-                coordsBeen.append(coordsFound[0])
-                coordsFound.pop(0)
-                print'coordsFound: ', coordsFound
-                print'coordsBeen: ', coordsBeen
+				p_robot = PoseStamped()
+				p_robot.header.frame_id = "thorvald_001/kinect2_rgb_optical_frame"
 
-            else:
-                rospy.loginfo("The base failed to reach the desired pose")
+				#camera coords 
+				p_robot.pose.position.x  = ((cX - focus[2])*0.5)/focus[0]
+				p_robot.pose.position.y = ((cY - focus[5])*0.5)/focus[4]            
+				p_camera = self.tf_listener.transformPose('map', p_robot)
+				objectCoords[0] = p_camera.pose.position.x  
+				objectCoords[1] = p_camera.pose.position.y 
+				#print"test"
 
-                # Sleep to give the last log messages time to be sent
-                rospy.sleep(1)
+				for t in coordsBeen:
+					if t == objectCoords:
+						same = True
+						break						
+				if same == False:
+					objectsLocated.append(copy.copy(objectCoords))
+				
 
-    except rospy.ROSInterruptException:
-        rospy.loginfo("Ctrl-C caught. Quitting")
+		cv_image = cv2.resize(cv_image, (0,0), fx=0.5, fy=0.5)
+		mask = cv2.resize(mask, (0,0), fx=0.5, fy=0.5)
+		cv2.imshow("hsv", mask)
+		cv2.imshow("window", cv_image)
 
+		if len(objectsLocated) == 0:
+			if abs((coordsTop[0][0] - currentLocation[0]) + (coordsTop[0][1] - currentLocation[1])) < abs((coordsBottom[0][0] - currentLocation[0]) + (coordsBottom[0][1] - currentLocation[1])):
+				position = {'x':coordsTop[0][0], 'y' : coordsTop[0][1]}
+				quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 1.000, 'r4' : 0.000}   
+			else:
+				position = {'x':coordsBottom[0][0], 'y' : coordsBottom[0][1]}
+				quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
+
+			coordsTop.pop(0)
+			coordsBottom.pop(0)
+
+			rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
+			success = robot_main.goto(position, quaternion)
+
+			if success:
+				rospy.loginfo("Hooray, reached the desired pose")
+
+				coordsBeen.append(copy.copy(objectsLocated[0]))
+			else:
+				rospy.loginfo("The base failed to reach the desired pose")	
+				
+		else:
+
+			
+			position = {'x':objectsLocated[0][0], 'y' :objectsLocated[0][1]}
+			quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 1.000, 'r4' : 0.000}
+
+			objectsLocated.pop(0)
+
+			rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
+			success = robot_main.goto(position, quaternion)
+
+			if success:
+				rospy.loginfo("Hooray, reached the desired pose")
+
+				coordsBeen.append(copy.copy(objectsLocated[0]))
+			else:
+				rospy.loginfo("The base failed to reach the desired pose")
+
+	
+		cv2.imshow("hsv", mask)
+		cv2.imshow("window", cv_image)
+		cv2.waitKey(3)
+
+
+	def goto(self, pos, quat):
+		# Send a goal
+		self.goal_sent = True
+		goal = MoveBaseGoal()
+		goal.target_pose.header.frame_id = 'map'
+		goal.target_pose.header.stamp = rospy.Time.now()
+		goal.target_pose.pose = Pose(Point(pos['x'], pos['y'], 0.000), Quaternion(quat['r1'], quat['r2'], quat['r3'], quat['r4']))
+		#print'target_pose', goal.target_pose.pose 
+		# Start moving
+		self.move_base.send_goal(goal)
+
+		# Allow up to 60 seconds to complete task
+		success = self.move_base.wait_for_result(rospy.Duration(30)) 
+
+		state = self.move_base.get_state()
+		result = False
+
+		if success and state == GoalStatus.SUCCEEDED:
+				# We made it!
+			result = True
+		else:
+			self.move_base.cancel_goal()
+
+		self.goal_sent = False
+		return result
+
+
+
+	def shutdown(self):
+		if self.goal_sent:
+			self.move_base.cancel_goal()
+		rospy.loginfo("Stop")
+		rospy.sleep(1)
+		
+cv2.startWindowThread()
+rospy.init_node('robot_main')
+robot_main = Robot_main()
+rospy.spin()
+
+cv2.destroyAllWindows()
