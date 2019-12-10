@@ -159,17 +159,18 @@ class Robot_main:
                 p_robot.pose.position.y = ((cY - focus[5])*0.5)/focus[4]
                 p_camera = self.tf_listener.transformPose('map', p_robot)
                 #if shortener == 5:
-                objectCoords[0] = round(p_camera.pose.position.x, 3)  
-                objectCoords[1] = round(p_camera.pose.position.y, 3)
+                objectCoords[0] = round(p_camera.pose.position.x, 2)  
+                objectCoords[1] = round(p_camera.pose.position.y, 2)
                     #shortener = 0
 #                    print"test"
 #                shortener = shortener + 1
 #                print"shortener"
                 
                 for t in coordsBeen:
-                    if t == objectCoords:
-                        same = True
-                        break                        
+                    if abs((objectCoords[0] - currentLocation[0]) + (objectCoords[1] - currentLocation[1])) < 0.05:               
+                        if t == objectCoords:
+                            same = True
+                            break                        
                 if same == False:
                     objectsLocated.append(copy.copy(objectCoords))
 
@@ -188,8 +189,8 @@ class Robot_main:
                 position = {'x':coordsBottom[0][0], 'y' : coordsBottom[0][1]}
                 quaternion = {'r1' : 0.000, 'r2' : 0.000, 'r3' : 0.000, 'r4' : 1.000}
 
-            
-
+            print 'size of objects Located is: ', len(objectsLocated)
+            print'curently at ', currentLocation
             rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
             success = robot_main.goto(position, quaternion)
             #success = False 
@@ -219,8 +220,8 @@ class Robot_main:
             
            
             objectsLocated.pop(0)
-            
-
+            print 'size of objects Located is: ', len(objectsLocated)
+            print'curently at ', currentLocation
             rospy.loginfo("Go to (%s, %s) pose", position['x'], position['y'])
             success = robot_main.goto(position, quaternion)
             #success = False 
