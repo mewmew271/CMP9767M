@@ -159,8 +159,8 @@ class Robot_main:
                 p_robot.pose.position.y = ((cY - focus[5])*0.5)/focus[4]
                 p_camera = self.tf_listener.transformPose('map', p_robot)
                 #if shortener == 5:
-                objectCoords[0] = round(p_camera.pose.position.x, 2)  
-                objectCoords[1] = round(p_camera.pose.position.y, 2)
+                objectCoords[0] = round(p_camera.pose.position.x, 1)  
+                objectCoords[1] = round(p_camera.pose.position.y, 1)
                     #shortener = 0
 #                    print"test"
 #                shortener = shortener + 1
